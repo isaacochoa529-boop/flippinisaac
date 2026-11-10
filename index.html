@@ -81,6 +81,17 @@ const MODEL_IMG={v1:'switchOriginal',lite:'switchLite',oled:'switchOled'};
 
 /* ===== Business settings: edit here (or in the Owner dashboard) — never hardcode prices elsewhere ===== */
 const DEFAULT_CONFIG={
+/* ===== MAIL-IN SETTINGS — edit these two lines =====
+   shipAddress: your receiving address (use a PO Box or private mailbox, never your home).
+                It only appears after a customer reaches Stage 2. Note: anything in a website's code can be read by a
+                determined visitor, so treat this as "not advertised", not "secret".
+   trackingFormEndpoint: your Formspree form URL, e.g. "https://formspree.io/f/abcdwxyz".
+                Formspree stores each submission and emails it to you. Leave "" until it's set up —
+                the form will then tell customers to send tracking in Messenger instead. */
+ mailIn:{
+  shipAddress:"Flippin' Isaac\n[Street address or PO Box]\n[City], CA [ZIP]",
+  trackingFormEndpoint:""
+ },
  serviceEnabled:true, // false shows a "not taking orders" banner
  /* How a finished configuration becomes an order:
     "message"  = copy a prepared message and contact on Facebook Marketplace (current)
@@ -103,7 +114,7 @@ const DEFAULT_CONFIG={
  turnaround:"Est. 3–5 business days after your console arrives (not counting shipping time)",
  materials:15, /* modchip + thermal paste etc., shown as its own line; labor = price − materials */
  included:['Modchip installed and tested','Light internal cleaning','Fresh thermal paste'],
- returnShipping:15, returnInsurance:100, inboundEst:[10,20], /* illustrative USPS label range for shipping TO you — not a quote */ /* return = USPS Ground Advantage w/ tracking; USPS includes up to $100 insurance */ existingCardFee:10,uspsUrl:"https://www.usps.com/ship/online-shipping.htm",
+ returnShipping:15, returnInsurance:100, inboundEst:[10,20], /* illustrative USPS label range for shipping TO you — not a quote */ /* return = USPS Ground Advantage w/ tracking; USPS includes up to $100 insurance */ existingCardFee:10,uspsUrl:"https://cnsb.usps.com/",
  models:[
   {id:"v1",name:"Original Switch",sub:"V1 / V2",price:75,reserve:[29,32],tips:["Model number HAC-001 or HAC-001(-01) on the back","Detachable Joy-Con, 6.2\" screen","Thin strip kickstand on the left side"]},
   {id:"lite",name:"Switch Lite",sub:"Handheld only",price:85,reserve:[29,32],tips:["Model number HDH-001 on the back","One-piece body with built-in controls","Smaller 5.5\" screen, no kickstand"]},
@@ -211,6 +222,44 @@ function MessageStep({cfg,value,setValue,auto,onSend,status}){return html`<div c
   <div className="mt-3 flex flex-col gap-3 text-sm"><p className="text-mute">In the Facebook app, open <strong className="text-ink">Marketplace</strong>, search <strong className="text-ink">Isaac Ochoa</strong> and tap <strong className="text-ink">Message</strong>. Or try <a href=${cfg.business.fbUrl} target="_blank" rel="noopener" className="font-semibold text-acc underline">my profile link</a> (best on a computer).</p>
   <p className="text-mute">Facebook not working? Email it to me:</p><div className="flex items-center justify-between gap-3 rounded-xl bg-sunk px-4 py-3"><span className="font-mono select-all break-all">${cfg.business.email}</span><${Copy} text=${cfg.business.email}/></div>
   <a href=${'mailto:'+cfg.business.email+'?subject='+encodeURIComponent("Flippin' Isaac order")+'&body='+encodeURIComponent(value)} className="self-start inline-flex items-center rounded-full border border-line px-4 min-h-[44px] font-semibold hover:border-mute">Open email app</a></div></details></div>`}
+/* Stages 1–3 of mail-in. Approval stays manual: nothing here approves orders, takes payment or makes labels. */
+function MailIn({cfg,st,up,q}){const mi=cfg.mailIn||{};const addr=mi.shipAddress||'';const addrReady=addr&&!addr.includes('[');
+ const [f,setF]=useState({name:'',ref:st.reqRef||'',email:'',carrier:'USPS',tracking:'',_gotcha:''});const [errs,setErrs]=useState({});const [state,setState]=useState(()=>LS.get('fi_tracking_sent_'+st.reqRef,false)?'sent':'idle');const [msg,setMsg]=useState('');
+ const u=k=>e=>setF({...f,[k]:e.target.value});
+ const submit=async e=>{e.preventDefault();if(state==='sending'||state==='sent')return;
+  const er={};if(f.name.trim().length<2)er.name='Enter your name.';if(!f.ref.trim())er.ref='Enter your request # or confirmation code.';if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email))er.email='Enter an email like you@example.com.';
+  const tn=f.tracking.replace(/[\s-]/g,'').toUpperCase();if(!/^[A-Z0-9]{8,34}$/.test(tn))er.tracking='Check the tracking number on your receipt and try again.';
+  setErrs(er);if(Object.keys(er).length){document.getElementById('t-'+Object.keys(er)[0])?.focus();return}
+  if(f._gotcha)return;
+  if(!mi.trackingFormEndpoint){setState('error');setMsg("Online tracking submission isn't set up yet, so nothing was sent. Please send your tracking number to me in Messenger.");return}
+  setState('sending');setMsg('');
+  try{const r=await fetch(mi.trackingFormEndpoint,{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({_subject:'Tracking for '+f.ref.trim(),name:f.name.trim(),reference:f.ref.trim(),email:f.email.trim(),carrier:f.carrier,tracking:tn,console:q.model?q.model.name:'',microSD:st.sd==='new'?(st.gb+'GB included'):st.sd,estimate:money(q.total)})});
+   const j=await r.json().catch(()=>({}));
+   if(r.ok&&j.ok!==false){setState('sent');LS.set('fi_tracking_sent_'+st.reqRef,true);track('tracking_submitted',{w:'switch',carrier:f.carrier})}
+   else{setState('error');setMsg((j.errors&&j.errors[0]&&j.errors[0].message)||"That didn't go through. Please try again, or send your tracking number in Messenger.")}}
+  catch(err){setState('error');setMsg("Couldn't reach the server. Check your connection and try again, or send your tracking number in Messenger.")}};
+ const Stage=({n,t,open,children})=>html`<section className=${'rounded-3xl border-2 p-4 sm:p-5 flex flex-col gap-4 '+(open?'border-line bg-card':'border-dashed border-line bg-transparent opacity-60')}><h2 className="flex items-center gap-3 font-bold text-lg"><span className=${'grid place-items-center h-8 w-8 shrink-0 rounded-full font-mono text-sm '+(open?'bg-acc text-accink':'bg-sunk text-mute')}>${n}</span>${t}</h2>${open?children:null}</section>`;
+ return html`<div className="flex flex-col gap-3 mt-2">
+ <div className="rounded-2xl border-2 border-warn bg-warnsoft p-4 flex gap-3"><span className="text-warn font-bold text-xl leading-none" aria-hidden="true">!</span><p className="text-warn font-semibold">Do not ship your console until I have personally confirmed your service request.</p></div>
+ ${st.stage<2?html`<button type="button" onClick=${()=>{up({stage:2});track('mailin_stage',{stage:2})}} className="rounded-full border-2 border-line bg-card px-6 min-h-[52px] font-semibold hover:border-acc">I've Received Confirmation</button>`:null}
+ <${Stage} n="2" t="Ship your console" open=${st.stage>=2}>
+  <label className=${'flex items-start gap-3 rounded-2xl border-2 p-4 cursor-pointer '+(st.approved?'border-acc bg-accsoft':'border-line')}><input id="approved" type="checkbox" className="mt-0.5 h-5 w-5 shrink-0" checked=${!!st.approved} onChange=${e=>{up({approved:e.target.checked});if(e.target.checked)track('mailin_stage',{stage:'approved'})}}/><span className="text-sm font-semibold">I confirm that Flippin' Isaac has personally approved my mail-in request.</span></label>
+  ${st.approved?html`<div className="fade flex flex-col gap-3">
+   ${addrReady?html`<div className="rounded-2xl bg-sunk p-4 flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wide text-mute mb-1">Ship to</p><pre className="font-mono text-sm whitespace-pre-wrap select-all">${addr}</pre></div><${CopyBtn} text=${addr} label="Copy Shipping Address"/></div>`:html`<div className="rounded-2xl border-2 border-dashed border-line p-4 text-sm text-mute">The shipping address isn't on the site yet. I'll send it to you in Messenger.</div>`}
+   <a href=${cfg.uspsUrl} target="_blank" rel="noopener" className="inline-flex items-center justify-center rounded-full bg-acc text-accink px-6 min-h-[52px] font-semibold hover:brightness-110">Open USPS Click-N-Ship ↗</a>
+   <ul className="flex flex-col gap-1.5 text-sm">${['Use tracked shipping and keep your receipt.','Remove game cards and accessories unless I asked for them.','Insure it for what your console is worth.'].map(t=>html`<li key=${t} className="flex gap-2"><span className="text-ok font-bold" aria-hidden="true">✓</span>${t}</li>`)}</ul>
+   <${Learn} q="How to pack it safely"><ol className="list-decimal pl-4 flex flex-col gap-1"><li>Back up your saves if you can.</li><li>Wrap the console in bubble wrap. Tape over the screen side with a soft layer first.</li><li>Use a sturdy box with about 2 inches of padding on every side, so nothing moves when you shake it.</li><li>Add a note inside with your name and request # (${st.reqRef}).</li><li>Tape all seams and stick the label flat on top.</li></ol><//>
+   <${Learn} q="Using Click-N-Ship"><ol className="list-decimal pl-4 flex flex-col gap-1"><li>Sign in or make a free USPS account.</li><li>Enter your address as the sender.</li><li>Paste my address as the recipient.</li><li>Weigh the packed box and enter its size.</li><li>Pick Ground Advantage (tracking included), pay USPS and print.</li></ol><//></div>`:null}<//>
+ <${Stage} n="3" t="Send me your tracking number" open=${st.stage>=2&&st.approved}>
+  ${state==='sent'?html`<div className="fade rounded-2xl bg-accsoft p-4"><p className="font-semibold">Thanks! Your tracking information has been received.</p><p className="text-sm text-mute mt-1">I'll keep an eye out for your console and contact you when it arrives.</p></div>`
+  :html`<form noValidate onSubmit=${submit} className="flex flex-col gap-3">
+   <div className="grid gap-3 sm:grid-cols-2"><${Field} id="t-name" label="Your name" req autoComplete="name" value=${f.name} onInput=${u('name')} error=${errs.name}/><${Field} id="t-ref" label="Request # or confirmation code" req value=${f.ref} onInput=${u('ref')} error=${errs.ref}/><${Field} id="t-email" label="Email" req type="email" autoComplete="email" value=${f.email} onInput=${u('email')} error=${errs.email}/>
+    <div className="flex flex-col gap-1.5"><label htmlFor="t-carrier" className="text-sm font-semibold">Carrier <span className="text-acc" aria-hidden="true">*</span></label><select id="t-carrier" value=${f.carrier} onChange=${u('carrier')} className="rounded-xl border border-line bg-card px-4 py-3 text-base">${['USPS','UPS','FedEx','Other'].map(c=>html`<option key=${c}>${c}</option>`)}</select></div>
+    <div className="sm:col-span-2"><${Field} id="t-tracking" label="Tracking number" req autoComplete="off" value=${f.tracking} onInput=${u('tracking')} error=${errs.tracking}/></div></div>
+   <input type="text" name="_gotcha" tabIndex="-1" autoComplete="off" value=${f._gotcha} onInput=${u('_gotcha')} className="hidden" aria-hidden="true"/>
+   ${state==='error'?html`<p className="rounded-xl bg-warnsoft text-warn p-3 text-sm" role="alert">${msg}</p>`:null}
+   <button type="submit" disabled=${state==='sending'} className="rounded-full bg-acc text-accink px-6 min-h-[52px] font-semibold hover:brightness-110 disabled:opacity-50">${state==='sending'?'Sending…':'Submit Tracking'}</button></form>`}<//></div>`}
+function CopyBtn({text,label}){const [ok,setOk]=useState(false);return html`<button type="button" onClick=${()=>copyText(text).then(()=>{setOk(true);setTimeout(()=>setOk(false),1600)})} className="shrink-0 rounded-full border border-line bg-card px-3 min-h-[40px] text-sm font-semibold hover:border-acc">${ok?'Copied ✓':label}</button>`}
 function Summary({cfg,st,compact}){const q=quote(cfg,st);const [lo,hi]=cfg.inboundEst||[10,20];
  if(!q.model)return html`<div className="rounded-2xl border border-line bg-card p-5 text-sm text-mute">Pick your Switch to see pricing.</div>`;
  return html`<div className="rounded-2xl border border-line bg-card p-4 flex flex-col gap-3">
@@ -223,7 +272,7 @@ function Summary({cfg,st,compact}){const q=quote(cfg,st);const [lo,hi]=cfg.inbou
 
 /* ===== Switch service wizard ===== */
 function SwitchWizard({cfg}){
- const [st,setSt]=useState(()=>LS.get('fi_sw',{step:0,familiar:null,model:null,sd:null,gb:null,ack:false,form:{}}));
+ const [st,setSt]=useState(()=>{const v=LS.get('fi_sw',{step:0,familiar:null,model:null,sd:null,gb:null,ack:false,form:{}});return v.reqRef?v:{...v,reqRef:ref('S'),stage:1,approved:false}});
  const [errs,setErrs]=useState({});const [done,setDone]=useState(null);const [msg,setMsg]=useState(null);const [sent,setSent]=useState(null);
  const save=n=>{LS.set('fi_sw',{...n,form:{}});return n};
  const up=o=>setSt(p=>save({...p,...o}));
@@ -233,7 +282,7 @@ function SwitchWizard({cfg}){
  if(done)return html`<${ShipInstructions} cfg=${cfg} refNo=${done} q=${q} name=${st.form.name}/>`;
  const H=t=>html`<h1 className="text-3xl md:text-5xl font-extrabold">${t}</h1>`;
   const card=st.sd==='new'?cfg.cards.find(c=>c.gb===st.gb):null;const [lo,hi]=cfg.inboundEst||[10,20];
- const autoMsg=["Hi Isaac! I'd like to get my Switch modded through Flippin' Isaac.","",
+ const autoMsg=["Hi Isaac! I'd like to get my Switch modded through Flippin' Isaac.","","Request #: "+st.reqRef,
   "Console: "+(m?m.name+' ('+m.sub+')':'—'),
   "microSD: "+({own:"I'll set up my own card (recommended)",existing:"I'll send my own card (+"+money(cfg.existingCardFee)+" setup)",new:(card?card.gb+'GB preconfigured card (+'+money(card.price)+')':'new card')}[st.sd]||'—'),
   "Service: "+(m?money(m.price)+' (incl. '+money(cfg.materials)+' modchip + materials)':'—'),"Return shipping: "+money(cfg.returnShipping),
@@ -281,9 +330,10 @@ function SwitchWizard({cfg}){
   <div className="lg:hidden"><${Summary} cfg=${cfg} st=${st}/></div>
   <form noValidate onSubmit=${e=>e.preventDefault()} className="rounded-2xl border border-line bg-card p-5"><${ContactFields} f=${st.form} set=${f=>setSt(p=>({...p,form:f}))} errs=${errs} notesLabel="Anything about your console's condition?"/></form>
   <${Checkout} cfg=${cfg} total=${q.total} agreed=${!!st.terms} setAgreed=${v=>up({terms:v})} onPay=${()=>finish()}/></div>`
-  :html`<div className="flex flex-col gap-5">${H('Ready to get started?')}<p className="text-mute -mt-2">Nothing to pay now. Send me your setup.</p>
+  :html`<div className="flex flex-col gap-5">${H('Ready to get started?')}<p className="text-mute -mt-2">Nothing to pay now. Send me your setup. Your request # is <strong className="text-ink font-mono">${st.reqRef}</strong>.</p>
   <div className="lg:hidden"><${Summary} cfg=${cfg} st=${st}/></div>
-  <${MessageStep} cfg=${cfg} value=${msgText} setValue=${setMsg} auto=${autoMsg} onSend=${send} status=${sent}/></div>`}];
+  <${MessageStep} cfg=${cfg} value=${msgText} setValue=${setMsg} auto=${autoMsg} onSend=${send} status=${sent}/>
+  <${MailIn} cfg=${cfg} st=${st} up=${up} q=${q}/></div>`}];
  steps.forEach(x=>x.hint=(cfg.orderMode==='checkout'?'Today ':'Est. ')+money(q.total));
  const can=[st.familiar,st.model,st.sd&&(st.sd!=='new'||st.gb),st.ack,cfg.orderMode==='checkout'?st.terms:true][st.step];
  const finish=()=>{const e=validate(st.form);setErrs(e);if(Object.keys(e).length){document.getElementById('f-'+Object.keys(e)[0])?.focus();return}if(!st.terms)return;const r=ref('S');LS.set('fi_last_order',{ref:r,processor:cfg.payments.processor,items:q.lines.map(([d,a,c])=>({desc:d,amount:Number(a)||0,category:c})),totals:{...q.breakdown,total:q.total}}); /* no personal info here; a real backend stores the order */ track('wizard_complete',{w:'switch',sid:id,model:st.model,gb:st.gb||null,sd:st.sd});LS.del('fi_sw');setDone(r)};
